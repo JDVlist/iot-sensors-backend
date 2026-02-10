@@ -67,21 +67,24 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 # hiermee wordt create_db_and_tables() automatisch bij startup uitgevoerd.
 app = FastAPI(lifespan=lifespan)
 
+
 # -------------------------
 # API endpoints ("routes")
 # -------------------------
 
 
+# bijvoorbeeld: http://localhost:8001/
 @app.get("/")
 def hello() -> str:
     # Simpele health/test endpoint
-    return "Hello, Docker-iot-World!"
+    return "Hello, Docker-IOT-World!"
 
 
 @app.post("/heroes/")
 def create_hero(hero: Hero) -> Hero:
     # FastAPI parse't JSON body naar een Hero instance (Pydantic/SQLModel)
     # Session(engine) opent een DB sessie (unit-of-work scope)
+    # Keys in de JSON body van het request moeten overeen komen met de velden van de HERO class
     with Session(engine) as session:
         # Voeg object toe aan sessie (nog niet persistent)
         session.add(hero)
