@@ -6,8 +6,9 @@ from collections.abc import AsyncIterator, Sequence
 # asynccontextmanager maakt van een async generator een contextmanager
 # (FastAPI gebruikt dit voor startup/shutdown hooks via 'lifespan')
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 
 # SQLModel is een laag bovenop SQLAlchemy:
 # - SQLModel: base class voor je ORM model (én Pydantic model)
@@ -21,22 +22,33 @@ from sqlmodel import Field, Session, SQLModel, create_engine, select
 from config import settings
 
 
-# Dit is een SQLModel "table model":
-# - table=True betekent: maak hier een echte database tabel voor.
-# - Zonder table=True is het alleen een (Pydantic) datamodel.
-class Hero(SQLModel, table=True):
+class Measurement(SQLModel, table=True):
+    """
+    Dit is een SQLModel "table model":
+        - table=True betekent: maak hier een echte database tabel voor.
+        - Zonder table=True is het alleen een (Pydantic) datamodel.
+    """
+
     # id is optional bij het aanmaken (None), DB maakt 'm dan aan (autoincrement)
     # primary_key=True: dit is de primaire sleutel
     id: int | None = Field(default=None, primary_key=True)
+    device_id: str = Field(index=True)
+    sensor: str = Field(index=True)
+    value: float
 
-    # index=True: zet een DB index op deze kolom (sneller zoeken/filteren)
-    name: str = Field(index=True)
+    # lambda-functie zodat elke record een eigen datetime heeft, ipv de date-time bij opstarten
+    ts: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
-    # secret_name is verplicht (geen default) en niet geïndexeerd
-    secret_name: str
 
-    # age is optioneel, en ook geïndexeerd
-    age: int | None = Field(default=None, index=True)
+class MeasurementCreate(SQLModel):
+    """
+    Input schema zodat de user bijv. niet zelf een id mee kan sturen.
+    """
+
+    device_id: str
+    sensor: str
+    value: float
+    ts: datetime | None = None
 
 
 # Engine = het "hart" van SQLAlchemy/SQLModel:
@@ -46,15 +58,17 @@ engine = create_engine(str(settings.SQLALCHEMY_DATABASE_URI))
 
 
 def create_db_and_tables() -> None:
-    # SQLModel.metadata bevat alle table definitions die je met SQLModel gemaakt hebt.
-    # create_all(...) maakt tabellen aan als ze nog niet bestaan.
-    # (Let op: dit doet géén migrations; het is simpel "create if missing".)
+    """
+    SQLModel.metadata bevat alle table definitions die je met SQLModel gemaakt hebt.
+    create_all(...) maakt tabellen aan als ze nog niet bestaan.
+    (Let op: dit doet géén migrations; het is simpel "create if missing".)
+    """
     SQLModel.metadata.create_all(engine)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    # Lifespan runs bij startup voordat de app requests accepteert.
+    """Lifespan runs bij startup voordat de app requests accepteert."""
     # Hier maak je dus tabellen aan (eenmalig).
     create_db_and_tables()
     # yield geeft controle terug aan FastAPI: "startup is klaar, serve requests".
@@ -76,33 +90,56 @@ app = FastAPI(lifespan=lifespan)
 # bijvoorbeeld: http://localhost:8001/
 @app.get("/")
 def hello() -> str:
-    # Simpele health/test endpoint
+    """Simpele health/test endpoint"""
     return "Hello, Docker-IOT-World!"
 
 
-@app.post("/heroes/")
-def create_hero(hero: Hero) -> Hero:
-    # FastAPI parse't JSON body naar een Hero instance (Pydantic/SQLModel)
-    # Session(engine) opent een DB sessie (unit-of-work scope)
-    # Keys in de JSON body van het request moeten overeen komen met de velden van de HERO class
+@app.post("/measurements/")
+def create_measurement(payload: MeasurementCreate) -> Measurement:
+    """
+    Ontvangt een meting als JSON payload en slaat deze op in de database.
+
+    De request body wordt door FastAPI gevalideerd en geparsed naar een
+    `MeasurementCreate`-object (Pydantic/SQLModel). Dit object bevat alleen
+    de velden die een client (bijv. een ESP32) mag aanleveren.
+
+    Op basis van deze payload wordt een `Measurement` database-object aangemaakt
+    en opgeslagen in PostgreSQL. Database-gegenereerde velden, zoals de primaire
+    sleutel (`id`), worden na het committen teruggelezen en meegegeven in de response.
+
+    :param payload: De gevalideerde meetdata afkomstig van de client.
+    :type payload: MeasurementCreate
+    :return: De opgeslagen meting inclusief database-gegenereerde velden.
+    :rtype: Measurement
+    """
+    measurement = Measurement(
+        device_id=payload.device_id,
+        sensor=payload.sensor,
+        value=payload.value,
+        ts=payload.ts or datetime.now(UTC),
+    )
+
     with Session(engine) as session:
-        # Voeg object toe aan sessie (nog niet persistent)
-        session.add(hero)
-
-        # commit schrijft de insert naar de DB
-        session.commit()
-
-        # refresh haalt DB-gegenereerde velden op (zoals id)
-        session.refresh(hero)
-
-        # Return wordt door FastAPI als JSON teruggestuurd
-        return hero
+        session.add(measurement)  # Voeg object toe aan sessie (nog niet persistent)
+        session.commit()  # commit schrijft de insert naar de DB
+        session.refresh(
+            measurement
+        )  # refresh haalt DB-gegenereerde velden op (zoals id)
+        return measurement  # Return wordt door FastAPI als JSON teruggestuurd
 
 
-@app.get("/heroes/")
-def read_heroes() -> Sequence[Hero]:
+@app.get("/measurements/")
+def read_measurements(limit: int = Query(100, ge=1, le=1000)) -> Sequence[Measurement]:
+    """
+    Als je niets meegeeft: GET /measurements/ → max 100 records
+    Wil je meer: GET /measurements/?limit=500
+    ge=1 en le=1000 voorkomen per ongeluk “geef 1 miljoen rijen”
+
+    :param limit: Description
+    :type limit: int
+    :return: Description
+    :rtype: Sequence[Measurement]
+    """
     with Session(engine) as session:
-        # select(Hero) bouwt "SELECT * FROM hero"
-        # session.exec(...).all() haalt alle resultaten op als lijst
-        heroes = session.exec(select(Hero)).all()
-        return heroes
+        measurements = session.exec(select(Measurement).limit(limit)).all()
+        return measurements
