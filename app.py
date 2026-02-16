@@ -21,6 +21,14 @@ from sqlmodel import Field, Session, SQLModel, create_engine, select
 # settings komt uit config.py en leest env vars (POSTGRES_SERVER, etc.)
 from config import settings
 
+"""
+Some url's when hosted on localhost 8001:
+http://localhost:8001/docs
+http://localhost:8001/
+http://localhost:8001/measurements/
+http://localhost:8001/measurements/?accept=application/json
+"""
+
 
 class Measurement(SQLModel, table=True):
     """
@@ -87,11 +95,9 @@ app = FastAPI(lifespan=lifespan)
 # -------------------------
 
 
-# bijvoorbeeld: http://localhost:8001/
-@app.get("/")
-def hello() -> str:
-    """Simpele health/test endpoint"""
-    return "Hello, Docker-IOT-World!"
+@app.get("/health")
+def health():
+    return {"ok": True}
 
 
 @app.post("/measurements/")
