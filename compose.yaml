@@ -18,26 +18,33 @@ services:
       watch:
         - action: rebuild
           path: .
+
   db:
-    image: postgres:18
+    image: postgis/postgis:16-3.4
+    ports:
+      - "5434:5432"
     restart: always
     user: postgres
     secrets:
       - db-password
     volumes:
-      - db-data:/var/lib/postgresql
+      - db-data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql    # create the postgis extention if it does not exist
     environment:
       - POSTGRES_DB=example
+      - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD_FILE=/run/secrets/db-password
     expose:
       - 5432
     healthcheck:
-      test: ["CMD", "pg_isready"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d example"]
       interval: 10s
       timeout: 5s
       retries: 5
+
 volumes:
   db-data:
+
 secrets:
   db-password:
     file: db/password.txt
