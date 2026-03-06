@@ -7,6 +7,7 @@ This repo uses linting etc. Usage of the git UI will result in errors. Use:
 git add -A
 git commit -m "..."
 ```
+Sometimes, the pre-commit hook will implement changes. Simply add and commit again if you accept the changes.
 
 # .env
 Make an .env with:
