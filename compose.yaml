@@ -4,47 +4,41 @@ services:
       context: .
     ports:
       - 8001:8001
+    env_file: .env
     environment:
       - POSTGRES_SERVER=db
-      - POSTGRES_USER=postgres
-      - POSTGRES_DB=example
-      - POSTGRES_PASSWORD_FILE=/run/secrets/db-password
+      - POSTGRES_USER=$MAIN_USER
+      - POSTGRES_PASSWORD=$MAIN_PASSWORD
+      - POSTGRES_DB=$DB_NAME
     depends_on:
       db:
         condition: service_healthy
-    secrets:
-      - db-password
     develop:
       watch:
         - action: rebuild
           path: .
 
   db:
+    # container_name: iot-postgis
     image: postgis/postgis:16-3.4
     ports:
       - "5434:5432"
-    restart: always
+    restart: unless-stopped
     user: postgres
-    secrets:
-      - db-password
     volumes:
       - db-data:/var/lib/postgresql/data
-      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql    # create the postgis extention if it does not exist
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql    # create the postgis extension if it does not exist
+    env_file: .env
     environment:
-      - POSTGRES_DB=example
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD_FILE=/run/secrets/db-password
-    expose:
-      - 5432
+    - POSTGRES_USER=$MAIN_USER
+    - POSTGRES_PASSWORD=$MAIN_PASSWORD
+    # - PGDATA=$PGDATA
+    - POSTGRES_DB=$DB_NAME
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d example"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
       timeout: 5s
       retries: 5
 
 volumes:
   db-data:
-
-secrets:
-  db-password:
-    file: db/password.txt
